@@ -11,7 +11,7 @@ services:
     volumes:
       - keep-state:/data
     ports:
-      - "${PORT:-8082}:8080"
+      - "${BIND_IP:-0.0.0.0}:${PORT:-8082}:8080"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
