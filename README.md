@@ -14,13 +14,21 @@ An MCP server for Google Keep, built on [gkeepapi](https://github.com/kiwiz/gkee
 
 ## Auth
 
-`gkeepapi` authenticates with an email + master token (not your Google password, not an app password long-term). Get one:
+`gkeepapi` authenticates with an email and master token. To obtain one, sign in
+at [Google EmbeddedSetup](https://accounts.google.com/EmbeddedSetup), click
+"I agree", and copy the `oauth_token` cookie value from your browser's
+Developer Tools (Application/Storage → Cookies → `accounts.google.com`). The
+page may keep loading after you agree. Then run:
 
 ```bash
 uv run python scripts/get_master_token.py
 ```
 
-This trades a Google **App Password** (requires 2FA on the account) for a master token via `gpsoauth`, one time. It also pins a random device ID so the server doesn't rely on the host machine's MAC address for its device identity — needed since this runs in a container, not on a fixed physical device.
+The script prompts for the cookie with hidden input and exchanges it through
+`gpsoauth` for a master token. It does not use your Google password or an app
+password. Never share the cookie or master token; the master token grants full
+account access. It also pins a random device ID so the server doesn't rely on
+the host machine's MAC address for its device identity.
 
 Required env vars:
 
@@ -38,30 +46,63 @@ See `.env.example`.
 ## Quick Start
 
 ```bash
-uv sync
+uv sync --locked
 
 # Run locally (stdio)
 uv run python -m google_keep_mcp.server
 
-# Run as HTTP server
-uv run python -m google_keep_mcp.server --transport streamable-http --host 0.0.0.0 --port 8080
 ```
 
 ## Docker
 
-Pre-built multi-arch images (amd64/arm64) are published to GHCR on every push to `main`:
+Build the image from this checkout. The `Dockerfile` installs
+dependencies from `uv.lock` and runs the server as an unprivileged user:
 
 ```bash
-docker pull ghcr.io/suckerfish/google_keep_mcp:latest
+docker compose build
 ```
 
-Or `docker compose up` using `compose.yaml`. Health check at `GET /health`.
+To generate the Google master token without installing Python/uv on the host,
+complete the EmbeddedSetup browser steps above and run the setup script
+interactively in the locally built image:
 
-## Deployment
+```bash
+docker compose run --rm --pull never google-keep-mcp python scripts/get_master_token.py
+```
 
-Runs on `ampere` via Komodo (stack: `google-keep-mcp-ampere`), registered in MetaMCP's `main-namespace` as `google-keep-mcp` (port 8082). Credentials are injected via Komodo secret variables (`[[GOOGLE_KEEP_EMAIL]]`, `[[GOOGLE_KEEP_MASTER_TOKEN]]`, `[[GOOGLE_KEEP_DEVICE_ID]]`) — never stored in the stack config or this repo. `GOOGLE_KEEP_STATE_PATH` points at a mounted volume so the Keep state cache survives container restarts.
+The setup command uses a terminal so the cookie input is hidden. The
+Codex MCP command below uses `-T` to disable the terminal for STDIO.
 
-Pushing to `main` rebuilds the image; redeploy the stack via Komodo to pick it up (`auto_pull: true`, but a fresh deploy still needs to be triggered — it doesn't auto-redeploy on push).
+Create a local `.env` containing the printed `GOOGLE_KEEP_EMAIL`,
+`GOOGLE_KEEP_MASTER_TOKEN`, and `GOOGLE_KEEP_DEVICE_ID` before connecting the
+server. Do not commit or share this file. The script prints the token to your
+terminal; avoid saving its output in logs or shell history.
+
+Connect Codex to the container through STDIO, without publishing an HTTP port.
+Add this to your Codex `config.toml` and restart Codex:
+
+```toml
+[mcp_servers.google_keep]
+command = "docker"
+args = ["compose", "run", "--rm", "-T", "--pull", "never", "google-keep-mcp"]
+cwd = "<absolute path to this checkout>"
+enabled_tools = ["search_notes", "get_note", "list_labels"]
+```
+
+Replace `cwd` with the location of your checkout. Use `docker compose run`
+rather than `docker compose up`: the STDIO server
+needs its input and output connected to an MCP client. The service creates no
+port or Keep state volume. The read-only tool allowlist limits Codex's
+actions, but the Google token still grants the server broader access.
+
+## Upstream deployment (separate from this local setup)
+
+The upstream author describes a separate deployment on `ampere` via Komodo
+(stack: `google-keep-mcp-ampere`), registered in MetaMCP's `main-namespace` as
+`google-keep-mcp` (port 8082). The local Compose setup above does not use it.
+
+In the upstream repository, pushing to `main` rebuilds its image; the author
+then redeploys the stack via Komodo. This fork's local Compose setup is separate.
 
 ## A note on stability
 

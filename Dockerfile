@@ -1,27 +1,18 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/* && apt-get clean
+ENV UV_PYTHON_DOWNLOADS=never
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PATH="/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
 WORKDIR /app
+RUN python -m pip install --no-cache-dir uv==0.13.6
 
-RUN pip install --no-cache-dir uv==0.8.15
-
-COPY pyproject.toml ./
-COPY uv.lock* ./
+COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
+COPY scripts/get_master_token.py ./scripts/get_master_token.py
+RUN uv sync --locked --no-dev --no-editable
 
-RUN uv pip install --system --no-cache .
-
-RUN adduser --disabled-password --gecos '' --shell /bin/bash appuser \
-    && mkdir -p /data \
-    && chown -R appuser:appuser /app /data
+RUN useradd --create-home --shell /usr/sbin/nologin appuser
 USER appuser
 
-EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
-
-CMD ["python", "-m", "google_keep_mcp.server", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "google_keep_mcp.server", "--transport", "stdio"]
